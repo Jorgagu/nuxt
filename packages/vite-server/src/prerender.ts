@@ -85,6 +85,14 @@ export async function prerenderRoutes (nuxt: Nuxt, options: { publicDir: string,
   const written: PrerenderedRoute[] = []
   const linkParents = new Map<string, Set<string>>()
 
+  // the crawler only knows the total once the queue drains, so progress is reported
+  // against the routes discovered so far
+  let logged = 0
+  function log (entry: PrerenderedRoute): void {
+    logged++
+    logRoute(entry, linkParents, `[${logged}/${Math.max(logged, generated.size + queue.size)}]`)
+  }
+
   async function generateRoute (route: string): Promise<void> {
     route = decodeURI(route)
     if (generated.has(route) || !canPrerender(route)) { return }
@@ -98,7 +106,7 @@ export async function prerenderRoutes (nuxt: Nuxt, options: { publicDir: string,
     if (!WRITABLE_STATUSES.has(response.status)) {
       entry.error = { status: response.status, statusText: response.statusText }
       failed.push(entry)
-      logRoute(entry, linkParents)
+      log(entry)
       return
     }
 
@@ -116,7 +124,7 @@ export async function prerenderRoutes (nuxt: Nuxt, options: { publicDir: string,
       written.push(entry)
     }
 
-    logRoute(entry, linkParents)
+    log(entry)
 
     if (isImplicitHTML || route.endsWith('.html')) {
       for (const link of await extractLinks(body.toString('utf-8'), route, response, config.crawlLinks)) {
@@ -140,7 +148,7 @@ export async function prerenderRoutes (nuxt: Nuxt, options: { publicDir: string,
   await runParallel(queue, generateRoute, config, (route, error) => {
     const entry: PrerenderedRoute = { route, error: { status: 500, statusText: error instanceof Error ? error.message : String(error) } }
     failed.push(entry)
-    logRoute(entry, linkParents)
+    log(entry)
   })
 
   if (failed.length && config.failOnError) {
@@ -282,14 +290,14 @@ function decode (value: string): string | undefined {
   }
 }
 
-function logRoute (route: PrerenderedRoute, linkParents: Map<string, Set<string>>): void {
+function logRoute (route: PrerenderedRoute, linkParents: Map<string, Set<string>>, progress: string): void {
   if (!route.error) {
-    logger.log(`  ├─ ${route.route}${route.fileName ? '' : ' (skipped)'}`)
+    logger.log(`  ├─ ${route.route}${route.fileName ? '' : ' (skipped)'} ${progress}`)
     return
   }
   const parents = linkParents.get(route.route)
   logger.log([
-    `  ├─ ${route.route} (${route.error.status} ${route.error.statusText})`,
+    `  ├─ ${route.route} (${route.error.status} ${route.error.statusText}) ${progress}`,
     ...[...parents || []].map(parent => `  │ └── Linked from ${parent}`),
   ].join('\n'))
 }
